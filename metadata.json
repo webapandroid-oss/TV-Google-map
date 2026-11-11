@@ -1,0 +1,6 @@
+{
+  "name": "TV Google Map",
+  "description": "Interactive Google Maps explorer designed for Android TV with remote control D-Pad navigation, satellite & terrain modes, popular world landmarks, route details, and search.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
