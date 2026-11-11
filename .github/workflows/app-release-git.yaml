@@ -32,18 +32,25 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
-      - name: Set up Android SDK & Build Tools
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Accept Android SDK Licenses & Install Platforms
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "platforms;android-30" "build-tools;36.0.0" || true
 
       - name: Prepare Secrets Configuration (.env)
         run: |
           if [ ! -f .env ]; then
-            cp .env.example .env
+            touch .env
+            echo "GEMINI_API_KEY=" >> .env
           fi
 
       - name: Setup Keystore for APK Signing
@@ -60,47 +67,48 @@ jobs:
             echo "STORE_PASSWORD=Tv@Map9#Xz8!Secure_AndroidTV2026" >> $GITHUB_ENV
             echo "KEY_PASSWORD=Tv@Map9#Xz8!Secure_AndroidTV2026" >> $GITHUB_ENV
           else
-            echo "Fallback: generating standard release keystore..."
-            keytool -genkey -v \
+            echo "Generating fallback upload key..."
+            keytool -genkeypair -v \
               -keystore my-upload-key.jks \
               -alias upload \
               -keyalg RSA \
               -keysize 2048 \
+              -sigalg SHA256withRSA \
               -validity 10000 \
               -storepass "Tv@Map9#Xz8!Secure_AndroidTV2026" \
               -keypass "Tv@Map9#Xz8!Secure_AndroidTV2026" \
-              -dname "CN=android tv os apps, OU=System Secure Core, O=Android TV OS, L=Dhaka, S=Dhaka, C=BD"
+              -dname "CN=android tv os apps, OU=System Secure Core, O=Android TV OS, L=Dhaka, ST=Dhaka, C=BD"
             echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=Tv@Map9#Xz8!Secure_AndroidTV2026" >> $GITHUB_ENV
             echo "KEY_PASSWORD=Tv@Map9#Xz8!Secure_AndroidTV2026" >> $GITHUB_ENV
           fi
 
-      - name: Compile and Build APK via Android Gradle Plugin (AGP)
-        run: |
-          # AGP compiles source code (KSP/APT, javac/kotlinc to .class, D8 to .dex, packaging & signing to .apk)
-          gradle assembleRelease --stacktrace --no-daemon
+      - name: Make Gradlew Executable
+        run: chmod +x ./gradlew
 
-      - name: Verify Generated Release APK
+      - name: Compile and Build Release APK via AGP
+        run: |
+          ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Verify and Locate Generated Release APK
         id: find_apk
         run: |
-          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
-            echo "::error::Release APK not found in app/build/outputs/apk/release!"
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" -not -name "*unaligned*" | head -n 1)
+          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
+            echo "::error::Release APK was not generated!"
             exit 1
           fi
-          echo "Found APK at: $APK_PATH"
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Found release APK: $APK_FILE"
           
-          # Rename to clean user-friendly filename for release
-          RELEASE_APK_NAME="TV-Google-Map-v1.0.0.0.apk"
-          cp "$APK_PATH" "$RELEASE_APK_NAME"
-          echo "release_apk_name=$RELEASE_APK_NAME" >> $GITHUB_OUTPUT
+          OUTPUT_APK="TV-Google-Map-v1.0.0.0.apk"
+          cp "$APK_FILE" "$OUTPUT_APK"
+          echo "apk_path=$OUTPUT_APK" >> $GITHUB_OUTPUT
 
-      - name: Upload APK as Workflow Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tv-google-map-release-apk
-          path: ${{ steps.find_apk.outputs.release_apk_name }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
           retention-days: 30
 
       - name: Determine Release Tag
@@ -109,7 +117,7 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
           else
-            TAG_NAME="v1.0.0.0-${{ github.run_number }}"
+            TAG_NAME="v1.0.0.0-build-${{ github.run_number }}"
           fi
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
@@ -122,25 +130,25 @@ jobs:
           body: |
             ## 📺 TV Google Map - Android TV Edition
             
-            **অ্যাপের বিবরণ ও রিলিজ তথ্য:**
+            **অ্যাপ্লিকেশন তথ্য:**
             - **অ্যাপের নাম:** TV Google Map
-            - **সংস্করণ (Version Name):** 1.0.0.0
-            - **সংস্করণ কোড (Version Code):** 1
-            - **টার্গেট এসডিকে (Target SDK):** 30 (Android 11)
-            - **মিনিমাম এসডিকে (Min SDK):** 24 (Android 7.0)
-            - **বিল্ড টুল:** Android Gradle Plugin (AGP) ও Kotlin Jetpack Compose
-            - **টিভি বৈশিষ্ট্য:**
+            - **ভার্সন নেম:** 1.0.0.0
+            - **ভার্সন কোড:** 1
+            - **মিনিমাম এসডিকে:** 24 (Android 7.0)
+            - **টার্গেট এসডিকে:** 30 (Android 11)
+            - **কম্পাইল এসডিকে:** 36 (AGP 9.1 / Jetpack Compose)
+            - **টিভি কনফিগারেশন:**
               - `android.software.leanback` (required="true")
               - `android.hardware.touchscreen` (required="false")
-              - সম্পূর্ণ রিমোট কন্ট্রোল ডি-প্যাড (D-Pad) নেভিগেশন
-              - সার্চ অন টিভি গুগল ম্যাপ (স্বয়ংক্রিয় কিবোর্ড পপআপ)
-              - রেস্তোরাঁ, কফি, শপ, সুপারমার্কেট ও শোরুমের কুইক সার্চ
-              - বর্তমান লোকেশন ডিটেকশন ও টোস্ট বার্তা
+              - ফুল রিমোট কন্ট্রোল ডি-প্যাড নেভিগেশন ও প্যান মোড
+              - সার্চ অন টিভি গুগল ম্যাপ (কার্সার পড়তেই অটো কিবোর্ড ওপেন)
+              - রেস্তোরাঁ, কফি, শপ, সুপারমার্কেট, শোরুম শর্টকাট
+              - কারেন্ট লোকেশন টোস্ট নোটিফিকেশন
             
             **APK ডাউনলোড:**
-            নিচে Assets সেকশন থেকে সরাসরি `${{ steps.find_apk.outputs.release_apk_name }}` ফাইলটি ডাউনলোড করে আপনার অ্যান্ড্রয়েড টিভিতে ইনস্টল করতে পারেন।
+            নিচের Assets সেকশন থেকে `${{ steps.find_apk.outputs.apk_path }}` ডাউনলোড করে আপনার টিভিতে সরাসরি ইনস্টল করতে পারেন।
           draft: false
           prerelease: false
-          files: ${{ steps.find_apk.outputs.release_apk_name }}
+          files: ${{ steps.find_apk.outputs.apk_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
